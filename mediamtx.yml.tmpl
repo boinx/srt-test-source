@@ -1,0 +1,60 @@
+# MediaMTX config TEMPLATE — rendered by start.sh into a real config in the cache dir.
+# Placeholders (@NAME@) are substituted with values from config.env. Do not run this
+# file directly; run ./start.sh (or ./run.sh), which renders it and launches MediaMTX.
+# ----------------------------------------------------------
+# Architecture:  ffmpeg (file loop / pattern) --SRT/MPEG-TS--> MediaMTX --SRT--> N mimoLive receivers
+# Each ffmpeg generator publishes into MediaMTX over SRT (streamid=publish:NAME); MediaMTX
+# is the SRT *listener* and fans the SAME stream out to multiple simultaneous read callers,
+# which a bare ffmpeg/srt-live-transmit listener cannot do (they are 1:1).
+
+logLevel: info
+logDestinations: [stdout]
+
+# --- Only the servers we need (lean + quiet) ---
+rtmp: no
+hls: no
+webrtc: no
+moq: no                          # experimental MoQ server off (else it writes auto.crt/auto.key)
+rtsp: no                         # not needed: generators publish over SRT/MPEG-TS, not RTSP
+
+# IMPORTANT: bind IPv4 explicitly. On macOS a Go ":port" binds IPv6-only ([::]),
+# which IPv4 clients (ffmpeg via 127.0.0.1, mimoLive over the LAN) cannot reach —
+# the SRT handshake then fails silently with no log. 0.0.0.0 forces IPv4.
+srt: yes                         # the SRT listener: generators publish in, mimoLive reads out
+srtAddress: 0.0.0.0:@SRT_PORT@
+
+# Control API (IPv4 loopback) — the dashboard (control.py) reads connection state here.
+api: yes
+apiAddress: 127.0.0.1:@API_PORT@
+
+# Restart the generator if it ever exits (e.g. file moved, transient error)
+pathDefaults:
+  runOnInitRestart: yes
+
+paths:
+  # ---- Looping prerecorded file (ORIGINAL video AND audio) ----
+  # mimoLive pulls:  srt://<this-mac-ip>:@SRT_PORT@?streamid=read:teststream
+  # Pure stream-copy of the source — real video + real program audio, no re-encode.
+  # The source is remuxed to MPEG-TS first (start.sh): an .mp4/.mov demuxes badly under
+  # ffmpeg -re (the stream drifts to ~0.66x real time); a .ts stream-copy paces at 1.0x.
+  # Published over SRT/MPEG-TS, which (unlike RTSP) needs no AAC/H.264 header extraction.
+  teststream:
+    runOnInit: >
+      ffmpeg -hide_banner -loglevel error
+      -re -stream_loop -1 -fflags +genpts -i @TS_PATH@
+      -c copy
+      -f mpegts srt://127.0.0.1:@SRT_PORT@?streamid=publish:$MTX_PATH&pkt_size=1316
+
+  # ---- Synthetic motion + audio test pattern (no source file needed) ----
+  # Always-moving frame counter — handy for spotting freezes / measuring latency.
+  # Synthetic, so its audio is a 1 kHz tone by design. mimoLive pulls:
+  #   srt://<this-mac-ip>:@SRT_PORT@?streamid=read:pattern
+  pattern:
+    runOnInit: >
+      ffmpeg -hide_banner -loglevel error
+      -re -f lavfi -i testsrc2=size=1280x720:rate=30
+      -f lavfi -i sine=frequency=1000:sample_rate=48000
+      -c:v h264_videotoolbox -realtime 1 -pix_fmt yuv420p
+      -b:v @PATTERN_BITRATE@ -maxrate @PATTERN_BITRATE@ -g 30
+      -c:a aac -b:a 128k
+      -f mpegts srt://127.0.0.1:@SRT_PORT@?streamid=publish:$MTX_PATH&pkt_size=1316
