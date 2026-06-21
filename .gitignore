@@ -5,5 +5,3 @@ config.env
 # runtime artifacts (normally live in ~/.cache/srt-test-source, ignore any stray local copies)
 mediamtx.gen.yml
 *.ts
-# local test media a user might drop in
-/media/

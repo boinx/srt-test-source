@@ -30,9 +30,9 @@ cd srt-test-source
 ./run.sh              # starts the streamer + dashboard
 ```
 
-That's it — with no video configured it serves a **test card** plus the synthetic
-**pattern** stream, so it works on a fresh clone with zero assets. To stream your own
-clip, point `SRC_VIDEO` at it in `config.env` and re-run.
+That's it — a fresh clone streams the **bundled sample video** (`media/test.mp4`) on
+`teststream`, plus the synthetic **pattern** stream. To stream your own clip instead,
+point `SRC_VIDEO` at it in `config.env` and re-run.
 
 In your receiver (e.g. mimoLive), add an SRT source in **Caller** mode:
 
@@ -49,7 +49,7 @@ use `streamid=#!::m=request,r=teststream`.
 
 | Variable | Default | Meaning |
 |---|---|---|
-| `SRC_VIDEO` | `~/Movies/srt-test.mp4` | Source clip for `teststream`. Missing → a test card is generated. |
+| `SRC_VIDEO` | `media/test.mp4` (bundled) | Source clip for `teststream`. Missing → a test card is generated. |
 | `SRT_PORT` | `8890` | SRT listener port (receivers connect here). |
 | `API_PORT` | `9997` | MediaMTX control API (loopback only). |
 | `DASH_PORT` | `8080` | Web dashboard (loopback only). |
@@ -126,6 +126,7 @@ dashboard at login and keep them alive:
 | `config.env` | User settings. |
 | `mediamtx.yml.tmpl` | MediaMTX config template (rendered by `start.sh`). |
 | `service.sh` | Install/remove the always-on launchd service. |
+| `media/test.mp4` | Bundled sample clip — the default `teststream` source. |
 
 ## License
 
