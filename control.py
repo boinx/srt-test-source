@@ -2,7 +2,7 @@
 """
 SRT test-source control server + web dashboard.
 
-- Serves a dashboard at http://127.0.0.1:8080/
+- Serves a dashboard at http://DASH_HOST:DASH_PORT/ (default 127.0.0.1:8080)
 - Shows live SRT connections (read from MediaMTX's control API on :9997)
 - Starts/stops CALLER-mode pushes (ffmpeg) to remote SRT listeners (e.g. mimoLive),
   each with auto-reconnect so it survives the receiver going away and coming back.

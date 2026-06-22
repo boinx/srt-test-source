@@ -11,7 +11,12 @@
 #   ./callers.sh add <receiver-ip> 9000
 #   ./callers.sh add <receiver-ip> 9000 pattern 200
 set -euo pipefail
-BASE="${SRT_DASH:-http://127.0.0.1:8080}"
+DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+CFG="$DIR/config.env"; [ -f "$CFG" ] || CFG="$DIR/config.env.example"
+# shellcheck source=/dev/null
+source "$CFG"
+# Talk to the dashboard on the configured DASH_PORT (override the whole URL with SRT_DASH).
+BASE="${SRT_DASH:-http://127.0.0.1:${DASH_PORT}}"
 
 die(){ echo "$1" >&2; exit 1; }
 curl -fsS "$BASE/api/status" >/dev/null 2>&1 || die "Control server not reachable at $BASE — run ./dashboard.sh first."

@@ -79,6 +79,9 @@ remote listener, and **auto-reconnects** if the receiver isn't up yet or restart
 ## Dashboard
 
 Open **http://127.0.0.1:8080** (started by `run.sh`, or run `./dashboard.sh` alone).
+The port is the `DASH_PORT` setting in `config.env` (default 8080) — change it there if
+8080 is taken (the CLI and launchers all read it). To reach the dashboard from another
+machine, launch with `DASH_HOST=0.0.0.0 ./dashboard.sh`.
 It polls every 2s and shows:
 
 - **Incoming SRT connections** — every reader/publisher with remote IP, path, and bytes.
