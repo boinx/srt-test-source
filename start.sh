@@ -53,7 +53,7 @@ cat <<EOF
   Add these as an SRT source in mimoLive (Caller mode). Open as many as you like:
 
      File / test card :  srt://${IP}:${SRT_PORT}?streamid=read:teststream
-     Synthetic pattern:  srt://${IP}:${SRT_PORT}?streamid=read:pattern
+     Synthetic pattern:  srt://${IP}:${SRT_PORT}?streamid=read:pattern   (needs ./dashboard.sh)
 
   If mimoLive only accepts the standard streamid syntax, use instead:
      srt://${IP}:${SRT_PORT}?streamid=#!::m=request,r=teststream

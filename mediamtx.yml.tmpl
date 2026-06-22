@@ -45,16 +45,9 @@ paths:
       -c copy
       -f mpegts srt://127.0.0.1:@SRT_PORT@?streamid=publish:$MTX_PATH&pkt_size=1316
 
-  # ---- Synthetic motion + audio test pattern (no source file needed) ----
-  # Always-moving frame counter — handy for spotting freezes / measuring latency.
-  # Synthetic, so its audio is a 1 kHz tone by design. mimoLive pulls:
-  #   srt://<this-mac-ip>:@SRT_PORT@?streamid=read:pattern
+  # ---- Synthetic A/V-sync test pattern (ingest path) ----
+  # This path just ACCEPTS a publisher; the stream is generated and published by the
+  # dashboard control server (control.py), so its resolution / fps / bitrate can be
+  # changed live from the web UI. Run ./dashboard.sh (or ./run.sh) to start it.
+  #   mimoLive pulls:  srt://<this-mac-ip>:@SRT_PORT@?streamid=read:pattern
   pattern:
-    runOnInit: >
-      ffmpeg -hide_banner -loglevel error
-      -re -f lavfi -i testsrc2=size=1280x720:rate=30
-      -f lavfi -i sine=frequency=1000:sample_rate=48000
-      -c:v h264_videotoolbox -realtime 1 -pix_fmt yuv420p
-      -b:v @PATTERN_BITRATE@ -maxrate @PATTERN_BITRATE@ -g 30
-      -c:a aac -b:a 128k
-      -f mpegts srt://127.0.0.1:@SRT_PORT@?streamid=publish:$MTX_PATH&pkt_size=1316

@@ -4,6 +4,9 @@ SRT test-source control server + web dashboard.
 
 - Serves a dashboard at http://DASH_HOST:DASH_PORT/ (default 127.0.0.1:8080)
 - Shows live SRT connections (read from MediaMTX's control API on :9997)
+- Runs the synthetic 'pattern' generator (ffmpeg -> publish into MediaMTX) and lets you
+  change its resolution / fps / bitrate live, plus an A/V-sync test (tone + white patch
+  blink together each second).
 - Starts/stops CALLER-mode pushes (ffmpeg) to remote SRT listeners (e.g. mimoLive),
   each with auto-reconnect so it survives the receiver going away and coming back.
 
@@ -103,11 +106,81 @@ def public_callers():
                 for c in _callers.values()]
 
 
+# ---------- synthetic 'pattern' generator (publishes into MediaMTX, reconfigurable live) ----------
+_pattern = {
+    "width":   int(os.environ.get("PATTERN_WIDTH")  or 1280),
+    "height":  int(os.environ.get("PATTERN_HEIGHT") or 720),
+    "fps":     int(os.environ.get("PATTERN_FPS")    or 30),
+    "bitrate": os.environ.get("PATTERN_BITRATE") or "3M",
+    "blink":   True,   # tone + white patch blink in sync each second (A/V-sync test)
+    "state": "starting", "restarts": 0, "stop": False, "proc": None, "gen": 0,
+}
+_plock = threading.Lock()
+BITRATE_RE = re.compile(r"^[0-9]+[KMk]?$")
+
+
+def _pattern_cmd(p):
+    cmd = ["ffmpeg", "-hide_banner", "-loglevel", "error",
+           "-re", "-f", "lavfi", "-i", f"testsrc2=size={p['width']}x{p['height']}:rate={p['fps']}",
+           "-f", "lavfi", "-i", "sine=frequency=1000:sample_rate=48000"]
+    if p["blink"]:
+        # white patch + 1 kHz tone both ON during [0,1),[2,3)... OFF during [1,2),[3,4)... -> in sync
+        cmd += ["-vf", "drawbox=x=iw-260:y=40:w=200:h=200:color=white:t=fill:enable='lt(mod(t,2),1)'",
+                "-af", "volume=0:enable='gte(mod(t,2),1)'"]
+    cmd += ["-c:v", "h264_videotoolbox", "-realtime", "1", "-pix_fmt", "yuv420p",
+            "-b:v", p["bitrate"], "-maxrate", p["bitrate"], "-g", str(p["fps"]),
+            "-c:a", "aac", "-b:a", "128k",
+            "-f", "mpegts", f"srt://{SRT_HOST}:{SRT_PORT}?streamid=publish:pattern&pkt_size=1316"]
+    return cmd
+
+
+def _pattern_runner():
+    p = _pattern
+    while not p["stop"]:
+        gen = p["gen"]
+        try:
+            p["proc"] = subprocess.Popen(_pattern_cmd(p), stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        except Exception as e:
+            p["state"] = f"error: {e}"; return
+        p["state"] = "running"
+        p["proc"].wait()
+        p["proc"] = None
+        if p["stop"]:
+            break
+        if p["gen"] == gen:                 # exited on its own (not a settings change)
+            p["restarts"] += 1
+        for _ in range(5):                  # brief backoff before respawn
+            if p["stop"] or p["gen"] != gen:
+                break
+            time.sleep(0.1)
+    p["state"] = "stopped"
+
+
+def update_pattern(width, height, fps, bitrate, blink):
+    width, height, fps, bitrate = int(width), int(height), int(fps), str(bitrate)
+    if not (160 <= width <= 7680 and 120 <= height <= 4320): raise ValueError("resolution out of range")
+    if not (1 <= fps <= 120):           raise ValueError("fps out of range (1-120)")
+    if not BITRATE_RE.match(bitrate):   raise ValueError("bitrate must look like 3M / 6000K / 8000000")
+    with _plock:
+        _pattern.update(width=width, height=height, fps=fps, bitrate=bitrate, blink=bool(blink))
+        _pattern["gen"] += 1            # bump generation -> runner respawns with new settings
+        proc = _pattern.get("proc")
+    if proc:
+        try: proc.terminate()
+        except Exception: pass
+
+
+def public_pattern():
+    with _plock:
+        return {k: _pattern[k] for k in ("width", "height", "fps", "bitrate", "blink", "state", "restarts")}
+
+
 def status():
     paths, perr = mtx_get("/v3/paths/list")
     conns, cerr = mtx_get("/v3/srtconns/list")
     out = {"ok": perr is None, "error": perr or cerr, "lanip": lan_ip(),
-           "srt_port": SRT_PORT, "paths": [], "conns": [], "callers": public_callers()}
+           "srt_port": SRT_PORT, "paths": [], "conns": [], "callers": public_callers(),
+           "pattern": public_pattern()}
     if paths:
         for p in paths.get("items", []):
             out["paths"].append({"name": p.get("name"), "ready": p.get("ready"),
@@ -157,6 +230,14 @@ class H(BaseHTTPRequestHandler):
             for c in public_callers():
                 stop_caller(c["id"])
             return self._send(200, json.dumps({"ok": True}))
+        if self.path == "/api/pattern":
+            try:
+                d = json.loads(raw or b"{}")
+                update_pattern(d.get("width", 1280), d.get("height", 720), d.get("fps", 30),
+                               d.get("bitrate", "3M"), d.get("blink", True))
+                return self._send(200, json.dumps({"ok": True, "pattern": public_pattern()}))
+            except Exception as e:
+                return self._send(400, json.dumps({"error": str(e)}))
         self._send(404, json.dumps({"error": "not found"}))
 
     def do_DELETE(self):
@@ -191,8 +272,10 @@ PAGE = r"""<!doctype html><html><head><meta charset="utf-8">
   .b-read{background:rgba(78,161,255,.16);color:var(--accent)}
   .b-publish{background:rgba(180,140,255,.16);color:var(--pub)}
   .b-running{background:rgba(61,220,132,.16);color:var(--ok)}
-  .b-reconnecting{background:rgba(255,180,84,.16);color:var(--warn)}
+  .b-reconnecting,.b-starting,.b-restarting{background:rgba(255,180,84,.16);color:var(--warn)}
   .b-idle,.b-stopped{background:rgba(139,147,163,.16);color:var(--mut)}
+  .chk{flex-direction:row!important;align-items:center;gap:7px}
+  .chk input{min-width:auto;width:16px;height:16px}
   .mut{color:var(--mut)}
   code{background:#0b0d11;border:1px solid var(--line);padding:1px 6px;border-radius:5px;color:#cfe3ff}
   form{display:flex;flex-wrap:wrap;gap:10px;align-items:flex-end;padding:16px}
@@ -213,6 +296,30 @@ PAGE = r"""<!doctype html><html><head><meta charset="utf-8">
   <span class="mut" id="hdr"></span>
 </header>
 <main>
+  <section class="card">
+    <div class="row"><h2 style="border:0;padding:12px 0">Synthetic pattern generator</h2>
+      <span class="mut" id="pat-state"></span></div>
+    <form id="pf">
+      <label>Resolution<select id="pres">
+        <option value="640x360">640 × 360</option>
+        <option value="1280x720">1280 × 720</option>
+        <option value="1920x1080">1920 × 1080</option>
+        <option value="2560x1440">2560 × 1440</option>
+        <option value="3840x2160">3840 × 2160</option>
+      </select></label>
+      <label>FPS<select id="pfps" style="min-width:80px">
+        <option>24</option><option>25</option><option>30</option><option>50</option><option>60</option>
+      </select></label>
+      <label>Bitrate<input id="pbr" value="3M" style="min-width:90px"></label>
+      <label class="chk">A/V-sync blink<input type="checkbox" id="pblink" checked></label>
+      <button type="submit">Apply</button>
+    </form>
+    <div class="hint">Live-reconfigurable <code>read:pattern</code> stream — use it to find what the
+      receiver can handle (try 1920×1080 @ 60 to mirror <code>teststream</code>). <b>A/V-sync blink:</b>
+      the 1 kHz tone and a white patch (top-right) turn on/off together each second — watch + listen
+      for drift. Applying restarts the generator (~1 s).</div>
+  </section>
+
   <section class="card">
     <div class="row"><h2 style="border:0;padding:12px 0">Incoming SRT connections</h2>
       <span class="mut" id="srturl"></span></div>
@@ -242,7 +349,7 @@ PAGE = r"""<!doctype html><html><head><meta charset="utf-8">
 const $=s=>document.querySelector(s);
 const fmtB=n=>{if(n==null)return '–';const u=['B','KB','MB','GB'];let i=0;n=+n;while(n>=1024&&i<3){n/=1024;i++}return n.toFixed(i?1:0)+' '+u[i]};
 const badge=(s)=>`<span class="badge b-${s}">${s}</span>`;
-let streamsLoaded=false;
+let streamsLoaded=false, patLoaded=false;
 
 async function tick(){
   let d; try{ d=await (await fetch('/api/status')).json(); }catch(e){ $('#dot').className='dot'; return; }
@@ -254,6 +361,13 @@ async function tick(){
   if(!streamsLoaded && d.paths.length){ const sel=$('#stream'); sel.innerHTML='';
     d.paths.forEach(p=>{const o=document.createElement('option');o.value=p.name;o.textContent=p.name;sel.appendChild(o)});
     streamsLoaded=true; }
+
+  // pattern generator: fill the form once, update the state line every tick
+  if(d.pattern){ const p=d.pattern;
+    if(!patLoaded){ $('#pres').value=p.width+'x'+p.height; $('#pfps').value=p.fps;
+      $('#pbr').value=p.bitrate; $('#pblink').checked=p.blink; patLoaded=true; }
+    $('#pat-state').innerHTML = `${badge(p.state)} &nbsp;<code>${p.width}×${p.height} @ ${p.fps}fps · ${p.bitrate}${p.blink?' · blink':''}</code> · ${p.restarts} restarts`;
+  }
 
   const cb=$('#conns'); cb.innerHTML='';
   d.conns.forEach(c=>{ const tr=document.createElement('tr');
@@ -276,11 +390,18 @@ $('#f').onsubmit=async(e)=>{ e.preventDefault();
   const r=await fetch('/api/callers',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
   if(!r.ok){ const e=await r.json(); alert('Error: '+(e.error||r.status)); } tick();
 };
+$('#pf').onsubmit=async(e)=>{ e.preventDefault();
+  const [w,h]=$('#pres').value.split('x').map(Number);
+  const body={width:w,height:h,fps:+$('#pfps').value,bitrate:$('#pbr').value.trim(),blink:$('#pblink').checked};
+  const r=await fetch('/api/pattern',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+  if(!r.ok){ const e=await r.json(); alert('Error: '+(e.error||r.status)); } tick();
+};
 tick(); setInterval(tick,2000);
 </script></body></html>"""
 
 
 if __name__ == "__main__":
+    threading.Thread(target=_pattern_runner, daemon=True).start()
     srv = ThreadingHTTPServer(BIND, H)
     print(f"SRT control dashboard:  http://{BIND[0]}:{BIND[1]}")
     print(f"MediaMTX API:           {MTX_API}")
@@ -288,6 +409,10 @@ if __name__ == "__main__":
     try:
         srv.serve_forever()
     except KeyboardInterrupt:
+        _pattern["stop"] = True
+        if _pattern.get("proc"):
+            try: _pattern["proc"].terminate()
+            except Exception: pass
         for c in public_callers():
             stop_caller(c["id"])
         print("\nstopped.")
