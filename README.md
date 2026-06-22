@@ -152,6 +152,7 @@ dashboard at login and keep them alive:
 | `mediamtx.yml.tmpl` | MediaMTX config template (rendered by `start.sh`). |
 | `service.sh` | Install/remove the always-on launchd service. |
 | `media/test.mp4` | Bundled sample clip — the default `teststream` source. |
+| `CLAUDE.md` | Agent guide (run/verify, architecture, don't-undo gotchas) for Claude Code. |
 
 ## License
 
