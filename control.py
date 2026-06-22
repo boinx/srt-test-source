@@ -289,6 +289,13 @@ PAGE = r"""<!doctype html><html><head><meta charset="utf-8">
   .row{display:flex;justify-content:space-between;align-items:center;padding:0 16px}
   .empty{padding:14px 16px;color:var(--mut)}
   .hint{padding:0 16px 14px;color:var(--mut);font-size:12px}
+  .pull{padding:6px 16px 12px}
+  .pull-h{font-size:12px;color:var(--mut);margin:12px 0 4px;text-transform:uppercase;letter-spacing:.05em}
+  .cmd{display:flex;gap:8px;align-items:center;margin:5px 0}
+  .cmd code{flex:1;min-width:0;overflow-x:auto;white-space:nowrap;padding:7px 10px}
+  .copy{flex:none;background:transparent;border:1px solid var(--line);color:var(--fg);
+        padding:5px 14px;font-weight:500}
+  .copy:disabled{color:var(--ok);border-color:var(--ok);cursor:default}
 </style></head><body>
 <header>
   <span class="dot" id="dot"></span>
@@ -296,6 +303,14 @@ PAGE = r"""<!doctype html><html><head><meta charset="utf-8">
   <span class="mut" id="hdr"></span>
 </header>
 <main>
+  <section class="card">
+    <h2>Connect a receiver</h2>
+    <div class="pull" id="pull"></div>
+    <div class="hint">Paste the <code>srt://</code> URL into mimoLive (Caller mode), or run the
+      <code>ffplay</code> command on another Mac on this network. Uses this Mac's LAN IP. If a
+      receiver rejects the streamid, use <code>streamid=#!::m=request,r=&lt;stream&gt;</code>.</div>
+  </section>
+
   <section class="card">
     <div class="row"><h2 style="border:0;padding:12px 0">Synthetic pattern generator</h2>
       <span class="mut" id="pat-state"></span></div>
@@ -349,7 +364,22 @@ PAGE = r"""<!doctype html><html><head><meta charset="utf-8">
 const $=s=>document.querySelector(s);
 const fmtB=n=>{if(n==null)return '–';const u=['B','KB','MB','GB'];let i=0;n=+n;while(n>=1024&&i<3){n/=1024;i++}return n.toFixed(i?1:0)+' '+u[i]};
 const badge=(s)=>`<span class="badge b-${s}">${s}</span>`;
-let streamsLoaded=false, patLoaded=false;
+let streamsLoaded=false, patLoaded=false, pullSig='';
+async function copy(text, btn){
+  try{ await navigator.clipboard.writeText(text); }
+  catch(e){ const ta=document.createElement('textarea'); ta.value=text;
+    ta.style.position='fixed'; ta.style.opacity='0'; document.body.appendChild(ta); ta.focus(); ta.select();
+    try{ document.execCommand('copy'); }catch(_){} document.body.removeChild(ta); }
+  if(btn){ const o=btn.textContent; btn.textContent='Copied'; btn.disabled=true;
+    setTimeout(()=>{ btn.textContent=o; btn.disabled=false; },1100); }
+}
+function cmdRow(text){
+  const row=document.createElement('div'); row.className='cmd';
+  const code=document.createElement('code'); code.textContent=text;
+  const b=document.createElement('button'); b.className='copy'; b.type='button'; b.textContent='Copy';
+  b.onclick=()=>copy(text,b);
+  row.appendChild(code); row.appendChild(b); return row;
+}
 
 async function tick(){
   let d; try{ d=await (await fetch('/api/status')).json(); }catch(e){ $('#dot').className='dot'; return; }
@@ -361,6 +391,18 @@ async function tick(){
   if(!streamsLoaded && d.paths.length){ const sel=$('#stream'); sel.innerHTML='';
     d.paths.forEach(p=>{const o=document.createElement('option');o.value=p.name;o.textContent=p.name;sel.appendChild(o)});
     streamsLoaded=true; }
+
+  // connect-a-receiver commands (rebuild only when LAN IP or the ready streams change)
+  const ready=d.paths.filter(p=>p.ready).map(p=>p.name).sort();
+  const sig=(d.lanip||'')+'|'+d.srt_port+'|'+ready.join(',');
+  if(sig!==pullSig){ pullSig=sig; const pull=$('#pull'); pull.innerHTML='';
+    if(!ready.length){ pull.innerHTML='<div class="mut" style="padding:6px 0">No streams ready yet — start the streamer.</div>'; }
+    ready.forEach(name=>{ const url=`srt://${d.lanip}:${d.srt_port}?streamid=read:${name}`;
+      const h=document.createElement('div'); h.className='pull-h'; h.textContent=name; pull.appendChild(h);
+      pull.appendChild(cmdRow(url));
+      pull.appendChild(cmdRow(`ffplay "${url}"`));
+    });
+  }
 
   // pattern generator: fill the form once, update the state line every tick
   if(d.pattern){ const p=d.pattern;
