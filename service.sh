@@ -10,6 +10,13 @@ LA="$HOME/Library/LaunchAgents"
 LOG="$HOME/.cache/srt-test-source"
 PREFIX="com.boinx.srt-test-source"
 
+# launchd gives services a minimal PATH. ffmpeg may live outside /opt/homebrew/bin
+# (e.g. the homebrew-ffmpeg tap puts it in /opt/homebrew/opt/ffmpeg*/bin), so derive
+# its real directory now and bake it into the plist — else runOnInit/pattern ffmpeg
+# silently fails to launch under the service and no streams appear.
+FF_DIR="$(dirname "$(command -v ffmpeg 2>/dev/null || echo /opt/homebrew/bin/ffmpeg)")"
+SVC_PATH="$FF_DIR:/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin"
+
 write_plist(){
   local name="$1" script="$2"
   cat > "$LA/$PREFIX.$name.plist" <<EOF
@@ -24,7 +31,7 @@ write_plist(){
   <key>StandardOutPath</key><string>$LOG/$name.out.log</string>
   <key>StandardErrorPath</key><string>$LOG/$name.err.log</string>
   <key>EnvironmentVariables</key><dict>
-    <key>PATH</key><string>/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+    <key>PATH</key><string>$SVC_PATH</string>
   </dict>
 </dict></plist>
 EOF
