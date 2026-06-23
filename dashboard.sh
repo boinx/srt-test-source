@@ -21,6 +21,7 @@ echo "Streams:    srt://${IP}:${SRT_PORT}?streamid=read:teststream   (and read:p
 echo
 
 export SRT_PORT DASH_PORT
+export SRT_READ_PASSPHRASE="${SRT_READ_PASSPHRASE:-}"
 export MTX_API="http://127.0.0.1:${API_PORT}"
 export PATTERN_WIDTH="${PATTERN_WIDTH:-1280}" PATTERN_HEIGHT="${PATTERN_HEIGHT:-720}"
 export PATTERN_FPS="${PATTERN_FPS:-30}" PATTERN_BITRATE="${PATTERN_BITRATE:-3M}"

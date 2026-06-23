@@ -39,6 +39,9 @@ paths:
   # ffmpeg -re (the stream drifts to ~0.66x real time); a .ts stream-copy paces at 1.0x.
   # Published over SRT/MPEG-TS, which (unlike RTSP) needs no AAC/H.264 header extraction.
   teststream:
+    # Read side AES-encrypted: readers must supply the SRT passphrase (from config.env).
+    # Rendered from @READ_PASSPHRASE@; an empty value renders as "" = no encryption.
+    srtReadPassphrase: "@READ_PASSPHRASE@"
     runOnInit: >
       ffmpeg -hide_banner -loglevel error
       -re -stream_loop -1 -fflags +genpts -i @TS_PATH@
@@ -51,3 +54,4 @@ paths:
   # changed live from the web UI. Run ./dashboard.sh (or ./run.sh) to start it.
   #   mimoLive pulls:  srt://<this-mac-ip>:@SRT_PORT@?streamid=read:pattern
   pattern:
+    srtReadPassphrase: "@READ_PASSPHRASE@"

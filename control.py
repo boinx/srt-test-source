@@ -21,6 +21,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 MTX_API  = os.environ.get("MTX_API", "http://127.0.0.1:9997")
 SRT_HOST = os.environ.get("SRT_HOST", "127.0.0.1")
 SRT_PORT = int(os.environ.get("SRT_PORT", "8890"))
+SRT_READ_PASSPHRASE = os.environ.get("SRT_READ_PASSPHRASE", "")   # AES passphrase readers must supply
 BIND     = (os.environ.get("DASH_HOST", "127.0.0.1"), int(os.environ.get("DASH_PORT", "8080")))
 
 NAME_RE = re.compile(r"^[A-Za-z0-9._-]+$")          # stream names + hostnames/IPs
@@ -48,6 +49,8 @@ def lan_ip():
 # ---------- caller (ffmpeg) management ----------
 def _runner(c):
     src = f"srt://{SRT_HOST}:{SRT_PORT}?streamid=read:{c['stream']}"
+    if SRT_READ_PASSPHRASE:
+        src += "&passphrase=" + SRT_READ_PASSPHRASE   # read hop is AES-encrypted
     dst = f"srt://{c['host']}:{c['port']}?mode=caller&latency={c['latency']}&pkt_size=1316"
     cmd = ["ffmpeg", "-hide_banner", "-loglevel", "error",
            "-i", src, "-c", "copy", "-f", "mpegts", dst]
@@ -179,7 +182,8 @@ def status():
     paths, perr = mtx_get("/v3/paths/list")
     conns, cerr = mtx_get("/v3/srtconns/list")
     out = {"ok": perr is None, "error": perr or cerr, "lanip": lan_ip(),
-           "srt_port": SRT_PORT, "paths": [], "conns": [], "callers": public_callers(),
+           "srt_port": SRT_PORT, "read_passphrase": SRT_READ_PASSPHRASE,
+           "paths": [], "conns": [], "callers": public_callers(),
            "pattern": public_pattern()}
     if paths:
         for p in paths.get("items", []):
@@ -308,7 +312,9 @@ PAGE = r"""<!doctype html><html><head><meta charset="utf-8">
     <div class="pull" id="pull"></div>
     <div class="hint">Paste the <code>srt://</code> URL into mimoLive (Caller mode), or run the
       <code>ffplay</code> command on another Mac on this network. Uses this Mac's LAN IP. If a
-      receiver rejects the streamid, use <code>streamid=#!::m=request,r=&lt;stream&gt;</code>.</div>
+      receiver rejects the streamid, use <code>streamid=#!::m=request,r=&lt;stream&gt;</code>.
+      When the streams are AES-encrypted, the URL includes <code>passphrase=…</code> — enter that
+      same passphrase in your receiver's SRT settings.</div>
   </section>
 
   <section class="card">
@@ -385,7 +391,8 @@ async function tick(){
   let d; try{ d=await (await fetch('/api/status')).json(); }catch(e){ $('#dot').className='dot'; return; }
   $('#dot').className='dot'+(d.ok?' up':'');
   $('#hdr').textContent = d.ok ? `MediaMTX up · ${d.paths.length} stream(s)` : ('MediaMTX unreachable: '+(d.error||''));
-  $('#srturl').innerHTML = d.lanip ? `pull base: <code>srt://${d.lanip}:${d.srt_port}?streamid=read:&lt;stream&gt;</code>` : '';
+  const pp = d.read_passphrase ? ('&passphrase='+d.read_passphrase) : '';
+  $('#srturl').innerHTML = d.lanip ? `pull base: <code>srt://${d.lanip}:${d.srt_port}?streamid=read:&lt;stream&gt;${pp}</code>` : '';
 
   // populate stream dropdown once
   if(!streamsLoaded && d.paths.length){ const sel=$('#stream'); sel.innerHTML='';
@@ -394,13 +401,13 @@ async function tick(){
 
   // connect-a-receiver commands (rebuild only when LAN IP or the ready streams change)
   const ready=d.paths.filter(p=>p.ready).map(p=>p.name).sort();
-  const sig=(d.lanip||'')+'|'+d.srt_port+'|'+ready.join(',');
+  const sig=(d.lanip||'')+'|'+d.srt_port+'|'+(d.read_passphrase||'')+'|'+ready.join(',');
   if(sig!==pullSig){ pullSig=sig; const pull=$('#pull'); pull.innerHTML='';
     if(!ready.length){ pull.innerHTML='<div class="mut" style="padding:6px 0">No streams ready yet — start the streamer.</div>'; }
-    ready.forEach(name=>{ const url=`srt://${d.lanip}:${d.srt_port}?streamid=read:${name}`;
+    ready.forEach(name=>{ const url=`srt://${d.lanip}:${d.srt_port}?streamid=read:${name}${pp}`;
       const h=document.createElement('div'); h.className='pull-h'; h.textContent=name; pull.appendChild(h);
       pull.appendChild(cmdRow(url));
-      pull.appendChild(cmdRow(`ffplay "${url}"`));
+      pull.appendChild(cmdRow(`ffplay '${url}'`));   // single quotes: '!' in the passphrase is history-expanded inside double quotes (zsh/bash)
     });
   }
 
