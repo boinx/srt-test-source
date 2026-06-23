@@ -48,6 +48,9 @@ once `./dashboard.sh` (or `./run.sh`) is running — see [Pattern generator](#pa
 many receivers as you like. If your receiver only accepts the standard streamid syntax,
 use `streamid=#!::m=request,r=teststream`.
 
+To password-protect the streams, set `SRT_READ_PASSPHRASE` — see
+[Stream encryption](#stream-encryption-optional).
+
 ## Configuration (`config.env`)
 
 | Variable | Default | Meaning |
@@ -56,9 +59,30 @@ use `streamid=#!::m=request,r=teststream`.
 | `SRT_PORT` | `8890` | SRT listener port (receivers connect here). |
 | `API_PORT` | `9997` | MediaMTX control API (loopback only). |
 | `DASH_PORT` | `8080` | Web dashboard (loopback only). |
+| `SRT_READ_PASSPHRASE` | _(empty)_ | SRT AES passphrase to **read** both streams. Empty = no encryption. If set, must be **10–79 chars** (libsrt limit) and receivers must supply it. |
 | `PATTERN_WIDTH` / `PATTERN_HEIGHT` | `1280` / `720` | Initial `pattern` resolution (change live in the dashboard). |
 | `PATTERN_FPS` | `30` | Initial `pattern` frame rate (change live in the dashboard). |
 | `PATTERN_BITRATE` | `3M` | Initial `pattern` bitrate (change live in the dashboard). |
+
+## Stream encryption (optional)
+
+Set `SRT_READ_PASSPHRASE` in `config.env` to AES-encrypt the **read** side of both
+streams (`teststream` and `pattern`). Receivers must then supply the same passphrase, or
+the SRT handshake is rejected. libsrt requires the passphrase to be **10–79 characters**;
+empty (the default) means no encryption.
+
+```
+srt://<this-mac-ip>:8890?streamid=read:teststream&passphrase=<your-passphrase>
+```
+
+In mimoLive, put the passphrase in the SRT source's **Encryption passphrase** field. The
+dashboard's copy-paste URLs include `&passphrase=…` automatically when one is set, and
+caller-mode pushes pick it up too. Only the reader hops are encrypted; the local publish
+into MediaMTX stays in the clear.
+
+> **Shell tip:** wrap a passphrase containing `!` in **single** quotes on the command line —
+> inside double quotes, zsh/bash expand `!` as history (you'll get a `dquote>` prompt or
+> `event not found`). e.g. `ffplay 'srt://…&passphrase=secret!'`.
 
 ## Caller mode (source dials out to a receiver)
 

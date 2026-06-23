@@ -17,7 +17,7 @@ Needs Homebrew. Edit `config.env` (ports, `SRC_VIDEO`, `PATTERN_*`) — it's cop
 ## Verify it works
 ```bash
 lsof -nP -iUDP:8890                                       # TYPE must read IPv4 (gotcha #1)
-ffprobe "srt://127.0.0.1:8890?streamid=read:teststream"   # should show h264 + aac
+ffprobe "srt://127.0.0.1:8890?streamid=read:teststream"   # h264 + aac (+ &passphrase=… if SRT_READ_PASSPHRASE set; single-quote a '!' passphrase)
 curl -s http://127.0.0.1:9997/v3/paths/list               # MediaMTX API: teststream (and pattern) ready
 # dashboard: http://127.0.0.1:8080   (ports are the defaults; see config.env)
 ```
@@ -33,6 +33,10 @@ curl -s http://127.0.0.1:9997/v3/paths/list               # MediaMTX API: testst
 - **caller mode** = `caller.sh` (one-shot) or the dashboard / `callers.sh` (managed, auto-reconnect)
   push a stream to a remote SRT *listener*.
 - **control.py** = dashboard + pattern generator + caller manager (stdlib Python, no deps).
+- **read encryption (optional)** = `SRT_READ_PASSPHRASE` (config.env) sets MediaMTX's per-path
+  `srtReadPassphrase` on both streams, rendered from `@READ_PASSPHRASE@` by `start.sh`. Empty = off;
+  libsrt requires 10–79 chars. Readers (ffprobe, mimoLive, caller pushes) must append
+  `&passphrase=…`; the local publish into MediaMTX stays unencrypted.
 
 ## Don't undo these (hard-won; each silently breaks things)
 1. **IPv4 binding.** `srtAddress: 0.0.0.0`, `apiAddress: 127.0.0.1` — never a bare `:port`. On macOS
@@ -49,6 +53,10 @@ curl -s http://127.0.0.1:9997/v3/paths/list               # MediaMTX API: testst
 5. **Target Python 3.9** (macOS system python). Keep code 3.9-compatible — notably, no backslashes
    inside f-string expressions (use `%`-formatting).
 6. **Hardware encoder.** `h264_videotoolbox` keeps 1080p60 real-time; `libx264` can't.
+7. **launchd PATH / ffmpeg location.** `ffmpeg` (homebrew-ffmpeg `ffmpeg-full`) lives **outside**
+   `/opt/homebrew/bin`. `service.sh` derives its dir (`command -v ffmpeg`) and prepends it to the
+   plist `PATH`; a bare `/opt/homebrew/bin` PATH finds mediamtx but not ffmpeg, so the always-on
+   service starts with **no streams**. Keep the dynamic derivation.
 
 ## Known finding
 teststream (1080p60, VBR stream-copy, 2 s GOP) makes a real-time receiver drop many frames where the
